@@ -2,13 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>2D Zoomable RepoVerse 🌌</title>
+<title>RepoVerse Supercluster 🌌</title>
 <style>
   body { margin:0; background:#111; font-family:sans-serif; color:white; overflow:hidden;}
   canvas { display:block; }
   #controls { position:absolute; top:10px; left:10px; z-index:10; }
-  input { padding:5px; border-radius:4px; border:none; margin-bottom:5px; width:200px; }
-  button { padding:5px; border-radius:4px; border:none; margin-left:5px; cursor:pointer; }
+  input, button { padding:5px; border-radius:4px; border:none; margin-bottom:5px; cursor:pointer; }
   #infoBox {
     position:absolute; top:10px; right:10px; background:rgba(20,20,20,0.9);
     padding:15px; border-radius:8px; width:300px; display:none; z-index:10;
@@ -18,8 +17,8 @@
 <body>
 
 <div id="controls">
-  <input id="username" placeholder="GitHub Username">
-  <button id="loadBtn">Load Galaxy</button>
+  <input id="username" placeholder="GitHub Username / Org">
+  <button id="loadBtn">Load Galaxy/Cluster</button>
   <button id="featuredBtn">Featured Repos</button>
 </div>
 
@@ -32,8 +31,8 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
+let galaxies = []; // array of galaxy objects
 let planets = [];
-let galaxies = [];
 let zoomScale = 1;
 let offsetX = 0;
 let offsetY = 0;
@@ -41,6 +40,7 @@ let zoomTarget = null;
 
 const infoBox = document.getElementById('infoBox');
 
+// Language color mapping
 function languageToColor(lang) {
   switch(lang){
     case "JavaScript": return "#f1e05a";
@@ -52,11 +52,11 @@ function languageToColor(lang) {
   }
 }
 
-// Fetch user repos (max 50 for realistic number)
+// Fetch user repos (max 50 for realistic slice)
 async function fetchRepos(username){
   try{
     const res = await fetch(`https://api.github.com/users/${username}/repos?per_page=50`);
-    if(!res.ok) throw new Error("User not found");
+    if(!res.ok) throw new Error("User/Org not found");
     return await res.json();
   } catch(e){
     alert(e.message);
@@ -64,14 +64,26 @@ async function fetchRepos(username){
   }
 }
 
-// Build galaxy
-function buildGalaxy(repos, centerX=canvas.width/2, centerY=canvas.height/2){
-  planets = [];
+// Fetch org members
+async function fetchOrgMembers(org){
+  try{
+    const res = await fetch(`https://api.github.com/orgs/${org}/members?per_page=50`);
+    if(!res.ok) throw new Error("Org not found");
+    return await res.json();
+  } catch(e){
+    alert(e.message);
+    return [];
+  }
+}
+
+// Build galaxy for a user
+function buildGalaxy(repos, centerX, centerY){
+  let galaxyPlanets = [];
   const radiusStep = 50;
-  repos.forEach((repo, i) => {
-    const angle = (i / repos.length) * 2 * Math.PI;
-    const r = radiusStep + (i % 5) * 20;
-    planets.push({
+  repos.forEach((repo,i)=>{
+    const angle = (i/repos.length)*2*Math.PI;
+    const r = radiusStep + (i%5)*20;
+    galaxyPlanets.push({
       x: centerX + Math.cos(angle)*r,
       y: centerY + Math.sin(angle)*r,
       size: Math.log(repo.stargazers_count + 5)*3,
@@ -79,40 +91,52 @@ function buildGalaxy(repos, centerX=canvas.width/2, centerY=canvas.height/2){
       repo: repo
     });
   });
-  draw();
+  return galaxyPlanets;
 }
 
-// Draw planets with zoom
+// Draw all galaxies and planets
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  planets.forEach(p=>{
+  
+  galaxies.forEach(g => {
+    // draw galaxy center
     ctx.beginPath();
-    ctx.arc(p.x*zoomScale + offsetX, p.y*zoomScale + offsetY, p.size*zoomScale, 0, Math.PI*2);
-    ctx.fillStyle = p.color;
+    ctx.arc(g.x*zoomScale + offsetX, g.y*zoomScale + offsetY, 20*zoomScale, 0, Math.PI*2);
+    ctx.fillStyle = "#fff";
     ctx.fill();
+    
+    // draw planets
+    g.planets.forEach(p=>{
+      ctx.beginPath();
+      ctx.arc(p.x*zoomScale + offsetX, p.y*zoomScale + offsetY, p.size*zoomScale, 0, Math.PI*2);
+      ctx.fillStyle = p.color;
+      ctx.fill();
+    });
   });
 }
 
-// Click to show repo info or zoom into galaxy
+// Click handler
 canvas.addEventListener('click', async (e)=>{
   const mx = (e.clientX - offsetX)/zoomScale;
   const my = (e.clientY - offsetY)/zoomScale;
   
-  // check if planet clicked
-  for(let p of planets){
-    const dx = mx - p.x;
-    const dy = my - p.y;
-    if(Math.sqrt(dx*dx + dy*dy) <= p.size){
-      showRepoInfo(p.repo);
-      return;
+  // Planet click
+  for(let g of galaxies){
+    for(let p of g.planets){
+      const dx = mx - p.x;
+      const dy = my - p.y;
+      if(Math.sqrt(dx*dx+dy*dy) <= p.size){
+        showRepoInfo(p.repo);
+        return;
+      }
     }
   }
-
-  // check if galaxy clicked
+  
+  // Galaxy click
   for(let g of galaxies){
     const dx = mx - g.x;
     const dy = my - g.y;
-    if(Math.sqrt(dx*dx + dy*dy) < 50){
+    if(Math.sqrt(dx*dx+dy*dy) < 30){
       zoomTarget = g;
       return;
     }
@@ -149,30 +173,43 @@ function animate(){
 }
 animate();
 
-// Load user galaxy
+// Load user or org galaxy/cluster
 document.getElementById('loadBtn').addEventListener('click', async ()=>{
-  const username = document.getElementById('username').value.trim();
-  if(!username) return;
-  const repos = await fetchRepos(username);
-  buildGalaxy(repos);
+  const input = document.getElementById('username').value.trim();
+  if(!input) return;
+  galaxies = [];
+  planets = [];
+  
+  // Try fetching as org
+  let members = await fetchOrgMembers(input);
+  if(members.length > 0){
+    // build cluster
+    const spacing = 200;
+    for(let i=0;i<members.length;i++){
+      const member = members[i];
+      const repos = await fetchRepos(member.login);
+      const cx = 100 + (i%5)*spacing;
+      const cy = 150 + Math.floor(i/5)*spacing;
+      galaxies.push({x:cx, y:cy, planets: buildGalaxy(repos,cx,cy)});
+    }
+  } else {
+    // fetch as user
+    const repos = await fetchRepos(input);
+    galaxies.push({x:canvas.width/2, y:canvas.height/2, planets: buildGalaxy(repos,canvas.width/2,canvas.height/2)});
+  }
 });
 
-// Load featured repos (top starred)
+// Load featured repos
 document.getElementById('featuredBtn').addEventListener('click', async ()=>{
   const res = await fetch('https://api.github.com/search/repositories?q=stars:>10000&sort=stars&order=desc&per_page=50');
   const data = await res.json();
-  planets = [];
-  const spacing = 80;
+  galaxies = [];
+  const spacing = 150;
   data.items.forEach((repo,i)=>{
-    planets.push({
-      x: 50 + (i%10)*spacing,
-      y: 100 + Math.floor(i/10)*spacing,
-      size: Math.log(repo.stargazers_count)*0.5,
-      color: languageToColor(repo.language),
-      repo: repo
-    });
+    const cx = 100 + (i%10)*spacing;
+    const cy = 100 + Math.floor(i/10)*spacing;
+    galaxies.push({x:cx, y:cy, planets: buildGalaxy([repo],cx,cy)});
   });
-  draw();
 });
 
 // Handle window resize
@@ -181,7 +218,7 @@ window.addEventListener('resize', ()=>{
   canvas.height = window.innerHeight;
   draw();
 });
-
 </script>
+
 </body>
 </html>
