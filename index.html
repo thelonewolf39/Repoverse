@@ -2,86 +2,109 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>RepoVerse 🌌</title>
+<title>2D RepoVerse 🌌</title>
 <style>
-  body { margin: 0; overflow: hidden; background: black; color: white; font-family: sans-serif; }
+  body { margin:0; background:#111; font-family:sans-serif; color:white; }
+  canvas { display:block; }
+  #controls { position:absolute; top:10px; left:10px; }
+  input { padding:5px; border-radius:4px; border:none; margin-bottom:5px; width:200px; }
+  button { padding:5px; border-radius:4px; border:none; margin-left:5px; cursor:pointer; }
   #infoBox {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: rgba(20, 20, 20, 0.9);
-    padding: 15px;
-    border-radius: 8px;
-    width: 300px;
-    display: none;
+    position:absolute; top:10px; right:10px; background:rgba(20,20,20,0.9);
+    padding:15px; border-radius:8px; width:300px; display:none;
   }
-  input, button { position: absolute; top: 10px; left: 10px; margin-bottom: 5px; }
-  a { color: #58a6ff; }
 </style>
 </head>
 <body>
 
-<input type="text" id="username" placeholder="GitHub Username">
-<button id="loadBtn">Load Galaxy</button>
+<div id="controls">
+  <input id="username" placeholder="GitHub Username">
+  <button id="loadBtn">Load Galaxy</button>
+  <button id="activityBtn">GitHub Activity</button>
+</div>
+
 <div id="infoBox"></div>
+<canvas id="canvas"></canvas>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
 <script>
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({antialias: true});
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
-
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
-let planets = [];
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
 const infoBox = document.getElementById('infoBox');
 
+let planets = [];
+
+// Color coding for languages
 function languageToColor(lang) {
   switch(lang){
-    case "JavaScript": return 0xf1e05a;
-    case "C#": return 0x178600;
-    case "C": return 0xa8b9cc;
-    case "Python": return 0x3572A5;
-    case "HTML": return 0xe34c26;
-    default: return 0x888888;
+    case "JavaScript": return "#f1e05a";
+    case "C#": return "#178600";
+    case "C": return "#a8b9cc";
+    case "Python": return "#3572A5";
+    case "HTML": return "#e34c26";
+    default: return "#888";
   }
 }
 
+// Fetch user repos
 async function fetchRepos(username){
-  try {
+  try{
     const res = await fetch(`https://api.github.com/users/${username}/repos?per_page=100`);
-    if(!res.ok) throw new Error("GitHub user not found");
-    const data = await res.json();
-    return data;
+    if(!res.ok) throw new Error("User not found");
+    return await res.json();
   } catch(e){
     alert(e.message);
     return [];
   }
 }
 
-function clearPlanets(){
-  planets.forEach(p => scene.remove(p));
+// Build 2D galaxy
+function buildGalaxy(repos){
   planets = [];
+  const cx = canvas.width/2;
+  const cy = canvas.height/2;
+  const radiusStep = 50;
+
+  repos.forEach((repo, i) => {
+    const angle = (i / repos.length) * 2 * Math.PI;
+    const r = radiusStep + (i % 5) * 20;
+    planets.push({
+      x: cx + Math.cos(angle)*r,
+      y: cy + Math.sin(angle)*r,
+      size: Math.log(repo.stargazers_count + 5)*3,
+      color: languageToColor(repo.language),
+      repo: repo
+    });
+  });
+
+  draw();
 }
 
-function buildGalaxy(repos){
-  clearPlanets();
-  repos.forEach((repo, i) => {
-    const size = Math.log(repo.stargazers_count + 5) * 0.1;
-    const color = languageToColor(repo.language);
-    const planet = new THREE.Mesh(
-      new THREE.SphereGeometry(size, 32, 32),
-      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5 })
-    );
-    planet.position.x = (i - repos.length/2) * 2.5;
-    planet.userData = repo;
-    scene.add(planet);
-    planets.push(planet);
+// Draw 2D galaxy
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  planets.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fillStyle = p.color;
+    ctx.fill();
   });
 }
+
+// Click handler
+canvas.addEventListener('click', (e)=>{
+  const mx = e.clientX;
+  const my = e.clientY;
+  planets.forEach(p=>{
+    const dx = mx - p.x;
+    const dy = my - p.y;
+    if(Math.sqrt(dx*dx + dy*dy) <= p.size){
+      showRepoInfo(p.repo);
+    }
+  });
+});
 
 function showRepoInfo(repo){
   infoBox.style.display = 'block';
@@ -95,17 +118,7 @@ function showRepoInfo(repo){
   `;
 }
 
-window.addEventListener('click', (event) => {
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-  raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObjects(planets);
-  if(intersects.length > 0){
-    const repo = intersects[0].object.userData;
-    showRepoInfo(repo);
-  }
-});
-
+// Load user galaxy
 document.getElementById('loadBtn').addEventListener('click', async ()=>{
   const username = document.getElementById('username').value.trim();
   if(!username) return;
@@ -113,24 +126,32 @@ document.getElementById('loadBtn').addEventListener('click', async ()=>{
   buildGalaxy(repos);
 });
 
-const light = new THREE.PointLight(0xffffff, 1);
-light.position.set(0,5,10);
-scene.add(light);
-
-camera.position.z = 8;
-
-window.addEventListener('resize', ()=>{
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+// Simple GitHub activity demo: top repos by stars
+document.getElementById('activityBtn').addEventListener('click', async ()=>{
+  planets = [];
+  const res = await fetch('https://api.github.com/search/repositories?q=stars:>10000&sort=stars&order=desc&per_page=50');
+  const data = await res.json();
+  const cx = canvas.width/2;
+  const cy = canvas.height/2;
+  const spacing = 50;
+  data.items.forEach((repo, i)=>{
+    planets.push({
+      x: 50 + (i%10)*spacing,
+      y: 100 + Math.floor(i/10)*spacing,
+      size: Math.log(repo.stargazers_count)*0.5,
+      color: languageToColor(repo.language),
+      repo: repo
+    });
+  });
+  draw();
 });
 
-function animate(){
-  requestAnimationFrame(animate);
-  planets.forEach(p => p.rotation.y += 0.01);
-  renderer.render(scene, camera);
-}
-animate();
+// Resize canvas
+window.addEventListener('resize', ()=>{
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  draw();
+});
 </script>
 
 </body>
