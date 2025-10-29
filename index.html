@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RepoVerse 🌌</title>
+<style>
+  body { margin: 0; overflow: hidden; background: black; color: white; font-family: sans-serif; }
+  #infoBox {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(20, 20, 20, 0.9);
+    padding: 15px;
+    border-radius: 8px;
+    width: 300px;
+    display: none;
+  }
+  input, button { position: absolute; top: 10px; left: 10px; margin-bottom: 5px; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+
+<input type="text" id="username" placeholder="GitHub Username">
+<button id="loadBtn">Load Galaxy</button>
+<div id="infoBox"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
+<script>
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let planets = [];
+
+const infoBox = document.getElementById('infoBox');
+
+function languageToColor(lang) {
+  switch(lang){
+    case "JavaScript": return 0xf1e05a;
+    case "C#": return 0x178600;
+    case "C": return 0xa8b9cc;
+    case "Python": return 0x3572A5;
+    case "HTML": return 0xe34c26;
+    default: return 0x888888;
+  }
+}
+
+async function fetchRepos(username){
+  try {
+    const res = await fetch(`https://api.github.com/users/${username}/repos?per_page=100`);
+    if(!res.ok) throw new Error("GitHub user not found");
+    const data = await res.json();
+    return data;
+  } catch(e){
+    alert(e.message);
+    return [];
+  }
+}
+
+function clearPlanets(){
+  planets.forEach(p => scene.remove(p));
+  planets = [];
+}
+
+function buildGalaxy(repos){
+  clearPlanets();
+  repos.forEach((repo, i) => {
+    const size = Math.log(repo.stargazers_count + 5) * 0.1;
+    const color = languageToColor(repo.language);
+    const planet = new THREE.Mesh(
+      new THREE.SphereGeometry(size, 32, 32),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5 })
+    );
+    planet.position.x = (i - repos.length/2) * 2.5;
+    planet.userData = repo;
+    scene.add(planet);
+    planets.push(planet);
+  });
+}
+
+function showRepoInfo(repo){
+  infoBox.style.display = 'block';
+  infoBox.innerHTML = `
+    <h2>${repo.name}</h2>
+    <p>${repo.description || "No description"}</p>
+    <p>⭐ Stars: ${repo.stargazers_count}</p>
+    <p>🍴 Forks: ${repo.forks_count}</p>
+    <p>💬 Language: ${repo.language || "N/A"}</p>
+    <a href="${repo.html_url}" target="_blank">🔗 Visit Repo</a>
+  `;
+}
+
+window.addEventListener('click', (event) => {
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(planets);
+  if(intersects.length > 0){
+    const repo = intersects[0].object.userData;
+    showRepoInfo(repo);
+  }
+});
+
+document.getElementById('loadBtn').addEventListener('click', async ()=>{
+  const username = document.getElementById('username').value.trim();
+  if(!username) return;
+  const repos = await fetchRepos(username);
+  buildGalaxy(repos);
+});
+
+const light = new THREE.PointLight(0xffffff, 1);
+light.position.set(0,5,10);
+scene.add(light);
+
+camera.position.z = 8;
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+function animate(){
+  requestAnimationFrame(animate);
+  planets.forEach(p => p.rotation.y += 0.01);
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+
+</body>
+</html>
