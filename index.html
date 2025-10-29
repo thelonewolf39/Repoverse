@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>2D RepoVerse 🌌</title>
+<title>2D Zoomable RepoVerse 🌌</title>
 <style>
-  body { margin:0; background:#111; font-family:sans-serif; color:white; }
+  body { margin:0; background:#111; font-family:sans-serif; color:white; overflow:hidden;}
   canvas { display:block; }
-  #controls { position:absolute; top:10px; left:10px; }
+  #controls { position:absolute; top:10px; left:10px; z-index:10; }
   input { padding:5px; border-radius:4px; border:none; margin-bottom:5px; width:200px; }
   button { padding:5px; border-radius:4px; border:none; margin-left:5px; cursor:pointer; }
   #infoBox {
     position:absolute; top:10px; right:10px; background:rgba(20,20,20,0.9);
-    padding:15px; border-radius:8px; width:300px; display:none;
+    padding:15px; border-radius:8px; width:300px; display:none; z-index:10;
   }
 </style>
 </head>
@@ -20,7 +20,7 @@
 <div id="controls">
   <input id="username" placeholder="GitHub Username">
   <button id="loadBtn">Load Galaxy</button>
-  <button id="activityBtn">GitHub Activity</button>
+  <button id="featuredBtn">Featured Repos</button>
 </div>
 
 <div id="infoBox"></div>
@@ -32,11 +32,15 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
+let planets = [];
+let galaxies = [];
+let zoomScale = 1;
+let offsetX = 0;
+let offsetY = 0;
+let zoomTarget = null;
+
 const infoBox = document.getElementById('infoBox');
 
-let planets = [];
-
-// Color coding for languages
 function languageToColor(lang) {
   switch(lang){
     case "JavaScript": return "#f1e05a";
@@ -48,10 +52,10 @@ function languageToColor(lang) {
   }
 }
 
-// Fetch user repos
+// Fetch user repos (max 50 for realistic number)
 async function fetchRepos(username){
   try{
-    const res = await fetch(`https://api.github.com/users/${username}/repos?per_page=100`);
+    const res = await fetch(`https://api.github.com/users/${username}/repos?per_page=50`);
     if(!res.ok) throw new Error("User not found");
     return await res.json();
   } catch(e){
@@ -60,50 +64,59 @@ async function fetchRepos(username){
   }
 }
 
-// Build 2D galaxy
-function buildGalaxy(repos){
+// Build galaxy
+function buildGalaxy(repos, centerX=canvas.width/2, centerY=canvas.height/2){
   planets = [];
-  const cx = canvas.width/2;
-  const cy = canvas.height/2;
   const radiusStep = 50;
-
   repos.forEach((repo, i) => {
     const angle = (i / repos.length) * 2 * Math.PI;
     const r = radiusStep + (i % 5) * 20;
     planets.push({
-      x: cx + Math.cos(angle)*r,
-      y: cy + Math.sin(angle)*r,
+      x: centerX + Math.cos(angle)*r,
+      y: centerY + Math.sin(angle)*r,
       size: Math.log(repo.stargazers_count + 5)*3,
       color: languageToColor(repo.language),
       repo: repo
     });
   });
-
   draw();
 }
 
-// Draw 2D galaxy
+// Draw planets with zoom
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  planets.forEach(p => {
+  planets.forEach(p=>{
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.arc(p.x*zoomScale + offsetX, p.y*zoomScale + offsetY, p.size*zoomScale, 0, Math.PI*2);
     ctx.fillStyle = p.color;
     ctx.fill();
   });
 }
 
-// Click handler
-canvas.addEventListener('click', (e)=>{
-  const mx = e.clientX;
-  const my = e.clientY;
-  planets.forEach(p=>{
+// Click to show repo info or zoom into galaxy
+canvas.addEventListener('click', async (e)=>{
+  const mx = (e.clientX - offsetX)/zoomScale;
+  const my = (e.clientY - offsetY)/zoomScale;
+  
+  // check if planet clicked
+  for(let p of planets){
     const dx = mx - p.x;
     const dy = my - p.y;
     if(Math.sqrt(dx*dx + dy*dy) <= p.size){
       showRepoInfo(p.repo);
+      return;
     }
-  });
+  }
+
+  // check if galaxy clicked
+  for(let g of galaxies){
+    const dx = mx - g.x;
+    const dy = my - g.y;
+    if(Math.sqrt(dx*dx + dy*dy) < 50){
+      zoomTarget = g;
+      return;
+    }
+  }
 });
 
 function showRepoInfo(repo){
@@ -118,6 +131,24 @@ function showRepoInfo(repo){
   `;
 }
 
+// Smooth zoom animation
+function animate(){
+  requestAnimationFrame(animate);
+  if(zoomTarget){
+    const targetX = canvas.width/2 - zoomTarget.x*3;
+    const targetY = canvas.height/2 - zoomTarget.y*3;
+    offsetX += (targetX - offsetX)*0.1;
+    offsetY += (targetY - offsetY)*0.1;
+    zoomScale += (3 - zoomScale)*0.1;
+  } else {
+    zoomScale += (1 - zoomScale)*0.1;
+    offsetX += (0 - offsetX)*0.1;
+    offsetY += (0 - offsetY)*0.1;
+  }
+  draw();
+}
+animate();
+
 // Load user galaxy
 document.getElementById('loadBtn').addEventListener('click', async ()=>{
   const username = document.getElementById('username').value.trim();
@@ -126,15 +157,13 @@ document.getElementById('loadBtn').addEventListener('click', async ()=>{
   buildGalaxy(repos);
 });
 
-// Simple GitHub activity demo: top repos by stars
-document.getElementById('activityBtn').addEventListener('click', async ()=>{
-  planets = [];
+// Load featured repos (top starred)
+document.getElementById('featuredBtn').addEventListener('click', async ()=>{
   const res = await fetch('https://api.github.com/search/repositories?q=stars:>10000&sort=stars&order=desc&per_page=50');
   const data = await res.json();
-  const cx = canvas.width/2;
-  const cy = canvas.height/2;
-  const spacing = 50;
-  data.items.forEach((repo, i)=>{
+  planets = [];
+  const spacing = 80;
+  data.items.forEach((repo,i)=>{
     planets.push({
       x: 50 + (i%10)*spacing,
       y: 100 + Math.floor(i/10)*spacing,
@@ -146,13 +175,13 @@ document.getElementById('activityBtn').addEventListener('click', async ()=>{
   draw();
 });
 
-// Resize canvas
+// Handle window resize
 window.addEventListener('resize', ()=>{
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   draw();
 });
-</script>
 
+</script>
 </body>
 </html>
