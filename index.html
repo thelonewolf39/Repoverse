@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>RepoVerse Universe 🌌</title>
+<title>RepoVerse Explorer 🌌</title>
 <style>
   body { margin:0; background:#111; font-family:sans-serif; color:white; overflow:hidden;}
   canvas { display:block; }
   #controls { position:absolute; top:10px; left:10px; z-index:10; }
-  button { padding:5px; border-radius:4px; border:none; margin-bottom:5px; cursor:pointer; }
+  input, button { padding:5px; border-radius:4px; border:none; margin-bottom:5px; cursor:pointer; }
   #infoBox {
     position:absolute; top:10px; right:10px; background:rgba(20,20,20,0.9);
     padding:15px; border-radius:8px; width:300px; display:none; z-index:10;
@@ -17,6 +17,8 @@
 <body>
 
 <div id="controls">
+  <input id="username" placeholder="GitHub Username / Org">
+  <button id="loadUser">Load User/Org</button>
   <button id="loadUniverse">Load All Repos Universe</button>
 </div>
 
@@ -48,20 +50,29 @@ function languageToColor(lang) {
   }
 }
 
-// Fetch repos slice
-async function fetchReposSlice(page=1){
+// Fetch repos
+async function fetchRepos(username){
   try{
-    const res = await fetch(`https://api.github.com/search/repositories?q=created:>2025-01-01&sort=updated&order=desc&per_page=50&page=${page}`);
-    const data = await res.json();
-    return data.items || [];
+    const res = await fetch(`https://api.github.com/users/${username}/repos?per_page=50`);
+    if(!res.ok) throw new Error("User/Org not found");
+    return await res.json();
+  } catch(e){ alert(e.message); return []; }
+}
+
+// Fetch org members
+async function fetchOrgMembers(org){
+  try{
+    const res = await fetch(`https://api.github.com/orgs/${org}/members?per_page=50`);
+    if(!res.ok) return [];
+    return await res.json();
   } catch(e){ return []; }
 }
 
-// Build planets with topic clusters
-function buildUniverse(repos){
+// Build planets with forks and clusters
+function buildUniverse(repos, startX=100, startY=100){
   planets = [];
   const topicsMap = {};
-  repos.forEach((repo,i)=>{
+  repos.forEach(repo=>{
     const topic = repo.topics && repo.topics[0] ? repo.topics[0] : "none";
     if(!topicsMap[topic]) topicsMap[topic] = [];
     topicsMap[topic].push(repo);
@@ -72,15 +83,15 @@ function buildUniverse(repos){
   for(const topic in topicsMap){
     const clusterRepos = topicsMap[topic];
     clusterRepos.forEach((repo,i)=>{
-      const cx = 100 + clusterIndex*clusterSpacing + (i%5)*60;
-      const cy = 100 + Math.floor(i/5)*60;
+      const cx = startX + clusterIndex*clusterSpacing + (i%5)*60;
+      const cy = startY + Math.floor(i/5)*60;
       planets.push({
         x: cx,
         y: cy,
         size: Math.log(repo.stargazers_count + 5),
         color: languageToColor(repo.language),
         repo: repo,
-        moons: repo.forks_count ? Math.min(repo.forks_count, 5) : 0 // max 5 moons
+        moons: repo.forks_count ? Math.min(repo.forks_count,5) : 0
       });
     });
     clusterIndex++;
@@ -92,12 +103,11 @@ function buildUniverse(repos){
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   planets.forEach(p=>{
-    // Planet
     ctx.beginPath();
     ctx.arc(p.x*zoomScale + offsetX, p.y*zoomScale + offsetY, p.size*zoomScale, 0, Math.PI*2);
     ctx.fillStyle = p.color;
     ctx.fill();
-    // Moons (forks)
+    // moons
     for(let m=0;m<p.moons;m++){
       const angle = (m/p.moons)*2*Math.PI;
       const r = p.size + 5;
@@ -118,7 +128,7 @@ canvas.addEventListener('click', e=>{
   for(let p of planets){
     const dx = mx - p.x;
     const dy = my - p.y;
-    if(Math.sqrt(dx*dx+dy*dy) <= p.size){
+    if(Math.sqrt(dx*dx + dy*dy) <= p.size){
       showRepoInfo(p.repo);
       return;
     }
@@ -138,8 +148,8 @@ function showRepoInfo(repo){
   `;
 }
 
-// Mouse wheel zoom
-canvas.addEventListener('wheel', (e)=>{
+// Zoom
+canvas.addEventListener('wheel', e=>{
   e.preventDefault();
   const mx = e.clientX;
   const my = e.clientY;
@@ -151,20 +161,39 @@ canvas.addEventListener('wheel', (e)=>{
   draw();
 });
 
-// Drag pan
-let isDragging = false;
-let dragStart = {x:0,y:0};
-canvas.addEventListener('mousedown', e=>{isDragging=true; dragStart={x:e.clientX - offsetX, y:e.clientY - offsetY}});
-canvas.addEventListener('mousemove', e=>{if(isDragging){offsetX = e.clientX - dragStart.x; offsetY = e.clientY - dragStart.y; draw();}});
+// Drag
+let isDragging=false, dragStart={x:0,y:0};
+canvas.addEventListener('mousedown', e=>{isDragging=true; dragStart={x:e.clientX-offsetX, y:e.clientY-offsetY}});
+canvas.addEventListener('mousemove', e=>{if(isDragging){offsetX=e.clientX-dragStart.x; offsetY=e.clientY-dragStart.y; draw();}});
 canvas.addEventListener('mouseup', ()=>{isDragging=false});
 canvas.addEventListener('mouseleave', ()=>{isDragging=false});
+
+// Load user/org
+document.getElementById('loadUser').addEventListener('click', async ()=>{
+  const input = document.getElementById('username').value.trim();
+  if(!input) return;
+  planets = [];
+  let members = await fetchOrgMembers(input);
+  if(members.length>0){
+    // org cluster
+    const spacing = 300;
+    for(let i=0;i<members.length;i++){
+      const member = members[i];
+      const repos = await fetchRepos(member.login);
+      buildUniverse(repos, 50 + (i%5)*spacing, 50 + Math.floor(i/5)*spacing);
+    }
+  } else {
+    const repos = await fetchRepos(input);
+    buildUniverse(repos, canvas.width/2-100, canvas.height/2-100);
+  }
+});
 
 // Load universe
 document.getElementById('loadUniverse').addEventListener('click', async ()=>{
   let allRepos = [];
-  for(let page=1; page<=5; page++){ // 5*50=250 repos
-    const slice = await fetchReposSlice(page);
-    allRepos = allRepos.concat(slice);
+  for(let page=1; page<=5; page++){
+    const slice = await fetch(`https://api.github.com/search/repositories?q=created:>2025-01-01&sort=updated&order=desc&per_page=50&page=${page}`).then(r=>r.json());
+    allRepos = allRepos.concat(slice.items || []);
   }
   buildUniverse(allRepos);
 });
@@ -176,5 +205,6 @@ window.addEventListener('resize', ()=>{
   draw();
 });
 </script>
+
 </body>
 </html>
