@@ -18,6 +18,7 @@
 
 <div id="controls">
   <input id="username" placeholder="GitHub Username / Org">
+  <input id="token" type="password" placeholder="GitHub PAT (optional)">
   <button id="loadUser">Load User/Org</button>
   <button id="loadUniverse">Load All Repos Universe</button>
 </div>
@@ -50,25 +51,38 @@ function languageToColor(lang) {
   }
 }
 
+// API fetch with optional PAT
+async function apiFetch(url){
+  const token = document.getElementById('token').value.trim();
+  const headers = token ? { Authorization: 'token ' + token } : {};
+  const res = await fetch(url, { headers });
+  if(!res.ok) throw new Error(`API Error: ${res.status}`);
+  return await res.json();
+}
+
 // Fetch repos
 async function fetchRepos(username){
   try{
-    const res = await fetch(`https://api.github.com/users/${username}/repos?per_page=50`);
-    if(!res.ok) throw new Error("User/Org not found");
-    return await res.json();
+    return await apiFetch(`https://api.github.com/users/${username}/repos?per_page=50`);
   } catch(e){ alert(e.message); return []; }
 }
 
 // Fetch org members
 async function fetchOrgMembers(org){
   try{
-    const res = await fetch(`https://api.github.com/orgs/${org}/members?per_page=50`);
-    if(!res.ok) return [];
-    return await res.json();
+    return await apiFetch(`https://api.github.com/orgs/${org}/members?per_page=50`);
   } catch(e){ return []; }
 }
 
-// Build planets with forks and clusters
+// Fetch universe slice
+async function fetchReposSlice(page=1){
+  try{
+    const data = await apiFetch(`https://api.github.com/search/repositories?q=created:>2025-01-01&sort=updated&order=desc&per_page=50&page=${page}`);
+    return data.items || [];
+  } catch(e){ return []; }
+}
+
+// Build planets with topic clusters & fork moons
 function buildUniverse(repos, startX=100, startY=100){
   planets = [];
   const topicsMap = {};
@@ -121,7 +135,7 @@ function draw(){
   });
 }
 
-// Click planet for info
+// Click planet
 canvas.addEventListener('click', e=>{
   const mx = (e.clientX - offsetX)/zoomScale;
   const my = (e.clientY - offsetY)/zoomScale;
@@ -175,7 +189,6 @@ document.getElementById('loadUser').addEventListener('click', async ()=>{
   planets = [];
   let members = await fetchOrgMembers(input);
   if(members.length>0){
-    // org cluster
     const spacing = 300;
     for(let i=0;i<members.length;i++){
       const member = members[i];
@@ -188,12 +201,12 @@ document.getElementById('loadUser').addEventListener('click', async ()=>{
   }
 });
 
-// Load universe
+// Load All Repos Universe
 document.getElementById('loadUniverse').addEventListener('click', async ()=>{
   let allRepos = [];
   for(let page=1; page<=5; page++){
-    const slice = await fetch(`https://api.github.com/search/repositories?q=created:>2025-01-01&sort=updated&order=desc&per_page=50&page=${page}`).then(r=>r.json());
-    allRepos = allRepos.concat(slice.items || []);
+    const slice = await fetchReposSlice(page);
+    allRepos = allRepos.concat(slice);
   }
   buildUniverse(allRepos);
 });
